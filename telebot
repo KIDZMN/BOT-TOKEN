@@ -1,0 +1,76 @@
+import requests
+from Cryptodome.Cipher import AES
+from Cryptodome.Util.Padding import pad
+from google.protobuf.descriptor_pb2 import DescriptorProto, FieldDescriptorProto
+from google.protobuf.descriptor import MakeDescriptor
+from google.protobuf.message_factory import GetMessageClass
+import urllib3
+import telebot
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def encrypt_api(plain_text):
+    plain_text = bytes.fromhex(plain_text)
+    key = bytes([89, 103, 38, 116, 99, 37, 68, 69, 117, 104, 54, 37, 90, 99, 94, 56])
+    iv = bytes([54, 111, 121, 90, 68, 114, 50, 50, 69, 51, 121, 99, 104, 106, 77, 37])
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return cipher.encrypt(pad(plain_text, AES.block_size)).hex()
+
+def create_dynamic_protobuf():
+    descriptor = DescriptorProto()
+    descriptor.name = "DynamicMessage"
+    
+    field = descriptor.field.add()
+    field.name = "field_8"
+    field.number = 8
+    field.label = FieldDescriptorProto.LABEL_OPTIONAL
+    field.type = FieldDescriptorProto.TYPE_STRING
+    
+    message_descriptor = MakeDescriptor(descriptor)
+    return GetMessageClass(message_descriptor)
+
+def encode_protobuf(field_8_value):
+    message_class = create_dynamic_protobuf()
+    message = message_class()
+    message.field_8 = field_8_value
+    return message.SerializeToString().hex()
+
+def update_bio(token, user_bio):
+    if not token or not user_bio:
+        return "Both token and bio are required"
+
+    encoded_bio = encode_protobuf(user_bio)
+    encrypted_data = encrypt_api(f'1011{encoded_bio}5a006200')
+
+    url = 'https://client.ind.freefiremobile.com/UpdateSocialBasicInfo'
+    headers = {
+        'Expect': '100-continue',
+        'Authorization': f'Bearer {token}',
+        'X-Unity-Version': '2018.4.11f1',
+        'X-GA': 'v1 1',
+        'ReleaseVersion': 'OB48',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; Redmi Note 5 MIUI/V11.0.3.0.PEIMIXM)',
+        'Host': 'clientbp.ggblueshark.com',
+        'Connection': 'Keep-Alive',
+        'Accept-Encoding': 'gzip'
+    }
+
+    response = requests.get(url, data=bytes.fromhex(encrypted_data), headers=headers, verify=False)
+    return "Bio updated successfully" if response.status_code == 200 else f"Request failed: {response.status_code}\n{response.text}"
+
+TELEGRAM_BOT_TOKEN = "your_telegram_bot_token"
+USER_TOKEN = "your_jwt_token"
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "Hello! Send /bio followed by text to update your bio.")
+
+@bot.message_handler(commands=['bio'])
+def set_bio(message):
+    user_bio = message.text.split(' ', 1)[1] if len(message.text.split()) > 1 else ""
+    bot.reply_to(message, update_bio(USER_TOKEN, user_bio) if user_bio else "Please provide new bio text after /bio command")
+
+bot.polling()
